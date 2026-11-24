@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>출퇴근 시간 기록기</title>
+  <style>
+    :root { color-scheme: light; --ink:#15243b; --muted:#66758b; --line:#dce4ee; --blue:#1769d2; --pale:#f3f7fc; --green:#19734a; --amber:#9a6500; }
+    * { box-sizing:border-box }
+    body { margin:0; background:#eef3f8; color:var(--ink); font:15px/1.5 "Segoe UI", "Malgun Gothic", sans-serif }
+    main { max-width:1120px; margin:0 auto; padding:28px 20px 50px }
+    header { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:22px }
+    h1 { margin:0 0 4px; font-size:28px; letter-spacing:-.04em }
+    h2 { margin:0 0 14px; font-size:18px; letter-spacing:-.02em }
+    p { margin:0; color:var(--muted) }
+    .layout { display:grid; grid-template-columns:1.15fr .85fr; gap:16px }
+    .card { background:white; border:1px solid var(--line); border-radius:15px; padding:20px; box-shadow:0 4px 16px #21364b08 }
+    .wide { grid-column:1/-1 }
+    .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:18px 0 0 }
+    .metric { background:var(--pale); border-radius:11px; padding:13px }
+    .metric label { display:block; color:var(--muted); font-size:12px; margin-bottom:4px }
+    .metric strong { font-size:17px }
+    .status { font-size:13px; padding:7px 10px; background:var(--pale); border-radius:20px; display:inline-block; color:var(--muted) }
+    .status.good { color:var(--green); background:#eaf7f0 }
+    .status.warn { color:var(--amber); background:#fff5df }
+    .route-row { display:grid; grid-template-columns:1fr auto; align-items:center; gap:12px; border-top:1px solid var(--line); padding:14px 0 }
+    .route-row:first-of-type { border-top:0 }
+    .route-row strong { display:block; font-size:15px }
+    .route-row small { color:var(--muted) }
+    .route-actions { display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end }
+    button, .button { border:0; border-radius:9px; padding:10px 13px; background:var(--blue); color:#fff; font:inherit; font-weight:650; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center }
+    button.secondary, .button.secondary { background:#e9f0f8; color:var(--ink) }
+    button:disabled { opacity:.55; cursor:default }
+    label.field { display:block; font-size:13px; font-weight:650; margin:13px 0 6px }
+    input[type=password], input[type=number], input[type=text], select { width:100%; border:1px solid var(--line); border-radius:8px; padding:10px 11px; font:inherit; background:white }
+    .inline { display:flex; gap:10px; align-items:center }
+    .inline > * { flex:1 }
+    .check { display:flex; gap:8px; align-items:center; margin:13px 0; color:var(--muted); font-size:14px }
+    .notice { padding:11px 12px; background:#fff7e6; color:#805400; border-radius:9px; font-size:13px; margin-top:12px }
+    .error { color:#a33131; font-size:13px; margin-top:10px; white-space:pre-wrap }
+    .ok { color:var(--green); font-size:13px; margin-top:10px }
+    .table-wrap { overflow:auto }
+    table { width:100%; border-collapse:collapse; font-size:13px; white-space:nowrap }
+    th, td { text-align:left; padding:10px 9px; border-bottom:1px solid var(--line) }
+    th { color:var(--muted); font-weight:650; background:#f8fafd }
+    .empty { color:var(--muted); padding:18px 0; font-size:14px }
+    .trip-active { display:none; margin-top:12px; padding:13px; border-radius:10px; background:#eaf7f0; color:var(--green) }
+    .trip-active button { margin-left:8px }
+    .small { font-size:12px; color:var(--muted); margin-top:9px }
+    @media(max-width:760px) { header { display:block } header .button { margin-top:12px } .layout { grid-template-columns:1fr } .wide { grid-column:auto } .metrics { grid-template-columns:1fr } .route-row { grid-template-columns:1fr } .route-actions { justify-content:flex-start } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>출퇴근 시간 기록기</h1>
+      <p>두 경로의 교통 예상시간과 실제 운행시간을 함께 모읍니다.</p>
+    </div>
+    <div class="inline" style="max-width:310px">
+      <a class="button" href="/api/export.xlsx">Excel 파일 저장</a>
+      <a class="button secondary" href="/api/export.csv">CSV 내려받기</a>
+    </div>
+  </header>
+  <div class="layout">
+    <section class="card">
+      <h2>수집 상태</h2>
+      <span id="status" class="status">불러오는 중</span>
+      <div class="metrics">
+        <div class="metric"><label>마지막 조회</label><strong id="lastPoll">-</strong></div>
+        <div class="metric"><label>예상시간 기록</label><strong id="estimateCount">-</strong></div>
+        <div class="metric"><label>실제 운행 기록</label><strong id="tripCount">-</strong></div>
+        <div class="metric"><label>5초 테스트 표본</label><strong id="testSamples">0건</strong></div>
+      </div>
+      <div id="stateMessage" class="small"></div><div id="collectionPeriod" class="small"></div>
+      <div id="stateError" class="error"></div>
+      <div class="notice">예상시간은 조회 시점의 지도 교통정보입니다. 자동 수집 결과와 출발·도착 기록은 현재 폴더의 commute_data.xlsx에도 반영됩니다. 이 앱이 실행 중이고 PC가 절전 상태가 아니어야 수집됩니다.</div>
+    </section>
+    <section class="card">
+      <h2>예상시간 수집 설정</h2>
+      <p>카카오 모빌리티 길찾기 API 키를 등록하면 시간대별 자동 조회를 시작합니다.</p>
+      <form id="settingsForm">
+        <label class="field" for="apiKey">REST API 키</label>
+        <input id="apiKey" type="password" autocomplete="new-password" placeholder="키를 입력하면 이 PC에 저장됩니다">
+        <div class="inline">
+          <div><label class="field" for="interval">조회 간격 (분)</label><input id="interval" type="number" min="1" max="60" value="10"></div>
+          <div><label class="field">자동 조회 시간</label><div class="small">평일 05:00–10:00 · 16:00–20:00</div></div>
+        </div>
+        <label class="check"><input id="weekdays" type="checkbox" checked> 월요일부터 금요일까지만 수집</label>
+        <label class="field" for="pollDirection">수동 조회 방향</label>
+        <select id="pollDirection"><option>출근</option><option>퇴근</option></select>
+        <button type="submit">설정 저장</button>
+        <button type="button" class="secondary" id="pollNow">선택한 방향 지금 조회</button>
+        <button type="button" class="secondary" id="testStart">출근·퇴근 동시 5초 테스트 (1분)</button>
+        <div id="settingsMessage"></div>
+      </form>
+      <p class="small">키는 이 PC의 settings.json에 저장됩니다. 좌표는 주소를 처음 조회할 때 저장합니다. 날씨 조회 시 집·회사 좌표를 Open-Meteo에 전송합니다. 설정한 키를 이용해 좌표를 찾은 뒤 날씨를 함께 저장합니다.</p>
+    </section>
+    <section class="card wide">
+      <h2>실제 운행 기록</h2>
+      <p>출발할 때 방향과 경로를 고르고 출발 버튼을, 도착하면 도착 버튼을 누르세요.</p>
+      <div id="routeChoices" style="margin-top:12px">
+        <div class="route-row">
+          <div><strong>경로 A · 풍서리 산 18-3 경유</strong><small>충남 천안시 동남구 풍세면 풍서리 산 18-3 · 평택파주고속도로 통과 여부를 지도 응답의 도로명으로 확인</small></div>
+          <div class="route-actions"><button class="secondary" data-start="출근,via">출근 출발</button><button class="secondary" data-start="퇴근,via">퇴근 출발</button></div>
+        </div>
+        <div class="route-row">
+          <div><strong>경로 B · 최단거리</strong><small>경부고속도로 통과 여부를 지도 응답의 도로명으로 확인</small></div>
+          <div class="route-actions"><button class="secondary" data-start="출근,shortest">출근 출발</button><button class="secondary" data-start="퇴근,shortest">퇴근 출발</button></div>
+        </div>
+      </div>
+      <div id="activeTrip" class="trip-active"></div>
+      <div class="small">실제 운행시간은 버튼을 누른 시각부터 계산합니다. 평균은 기록이 쌓인 뒤 시간대별로 표시됩니다.</div>
+    </section>
+    <section class="card wide">
+      <h2>시간대별 비교</h2>
+      <div id="recommendations" class="metrics" style="margin:0 0 16px"></div>
+      <div id="statsTable" class="empty">기록이 쌓이면 예상·실제 평균을 시간대별로 비교합니다.</div>
+    </section>
+    <section class="card wide">
+      <h2>최근 운행 기록</h2>
+      <div id="tripsTable" class="empty">아직 운행 기록이 없습니다.</div>
+    </section>
+    <section class="card wide">
+      <h2>최근 예상시간 조회</h2>
+      <div id="estimatesTable" class="empty">API 키를 설정하면 예상시간이 여기에 쌓입니다.</div>
+    </section>
+  </div>
+</main>
+<script>
+const routeNames = {via:"경유지 경로", shortest:"최단거리"};
+const fmtMinutes = s => s == null ? "-" : `${(s/60).toFixed(1)}분`;
+const fmtTime = value => value ? new Date(value).toLocaleString("ko-KR", {month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}) : "-";
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(path, data) {
+  const res = await fetch(path, data ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(data)} : {});
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || "요청을 처리하지 못했습니다.");
+  return payload;
+}
+function table(headers, rows) {
+  if (!rows.length) return '<div class="empty">표시할 기록이 없습니다.</div>';
+  return `<div class="table-wrap"><table><thead><tr>${headers.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(row=>`<tr>${row.map(v=>`<td>${v}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+function render(data) {
+  const s = data.state || {};
+  const status = document.getElementById("status");
+  status.textContent = s.test_running ? "1분 테스트 중" : data.settings.api_key_configured ? (s.polling ? "조회 중" : "자동 수집 대기") : "API 키 설정 필요";
+  status.className = "status " + (data.settings.api_key_configured ? "good" : "warn");
+  document.getElementById("lastPoll").textContent = fmtTime(s.last_poll);
+  document.getElementById("estimateCount").textContent = `${data.estimates_total}건`;
+  document.getElementById("tripCount").textContent = `${data.trips_total}건`;
+  document.getElementById("testSamples").textContent = `${s.test_samples || 0}건`;
+  document.getElementById("stateMessage").textContent = s.last_message || "";
+  document.getElementById("collectionPeriod").textContent = `수집 기간: ${data.settings.collection_start || "제한 없음"} ~ ${data.settings.collection_end || "제한 없음"}`;
+  document.getElementById("stateError").textContent = [s.last_error, s.test_error, s.excel_error].filter(Boolean).join(" · ");
+  document.getElementById("interval").value = data.settings.interval_minutes;
+  document.getElementById("weekdays").checked = data.settings.weekdays_only;
+  document.getElementById("testStart").disabled = !data.settings.api_key_configured || s.test_running;
+  const active = document.getElementById("activeTrip");
+  if (data.active_trip) {
+    active.style.display = "block";
+    active.innerHTML = `운행 중 · ${esc(data.active_trip.direction)} · ${esc(routeNames[data.active_trip.route_id])} · ${fmtTime(data.active_trip.started_at)} <button id="finishTrip">도착 기록</button>`;
+    document.getElementById("finishTrip").onclick = finishTrip;
+  } else active.style.display = "none";
+  const cards = ["출근", "퇴근"].map(direction => {
+    const rows = data.stats.filter(x=>x.direction===direction);
+    const actual = rows.filter(x=>x.actual_days>=3 && x.actual_avg_seconds!=null);
+    const estimates = rows.filter(x=>x.verified_days>=3 && x.verified_avg_seconds!=null);
+    const pool = actual.length ? actual.map(x=>({...x, basis:"실제", seconds:x.actual_avg_seconds, days:x.actual_days})) : estimates.map(x=>({...x, basis:"경로 확인된 예상", seconds:x.verified_avg_seconds, days:x.verified_days}));
+    const best = pool.sort((a,b)=>a.seconds-b.seconds)[0];
+    return `<div class="metric"><label>${direction} 최적 시간대 · 3일 이상 기록 기준</label><strong>${best ? `${String(best.hour).padStart(2,"0")}시대 · ${routeNames[best.route_id]}` : "기록 수집 중"}</strong><div class="small">${best ? `${best.basis} 평균 ${fmtMinutes(best.seconds)} · ${best.days}일 기록` : "실제 또는 확인된 예상시간이 3일 이상 쌓이면 표시"}</div></div>`;
+  }).join("");
+  document.getElementById("recommendations").innerHTML = cards;
+  const stats = data.stats.map(x => [esc(x.direction), esc(routeNames[x.route_id]), `${String(x.hour).padStart(2,"0")}시대`, fmtMinutes(x.avg_seconds), `${x.samples}회 / ${x.estimate_days}일`, `${x.verified_samples}회 / ${x.verified_days}일`, fmtMinutes(x.actual_avg_seconds), `${x.actual_samples}회 / ${x.actual_days}일`]);
+  document.getElementById("statsTable").innerHTML = table(["방향","경로","출발 시간대","예상 평균","예상 표본","지정 도로 확인 표본","실제 평균","실제 표본"], stats);
+  const trips = data.trips.map(t => {
+    const difference = t.actual_seconds == null || t.estimate_seconds == null ? "-" : `${t.actual_seconds > t.estimate_seconds ? "+" : "−"}${(Math.abs(t.actual_seconds-t.estimate_seconds)/60).toFixed(1)}분`;
+    return [esc(t.direction), esc(routeNames[t.route_id]), fmtTime(t.started_at), esc(t.weekday || "-"), esc(t.local_time || "-"), esc(t.departure_location || "-"), fmtTime(t.ended_at), fmtMinutes(t.actual_seconds), fmtMinutes(t.estimate_seconds), difference, esc(t.weather_description || "-"), t.temperature_c == null ? "-" : `${t.temperature_c}°C`, esc(t.note || "")];
+  });
+  document.getElementById("tripsTable").innerHTML = table(["방향","경로","출발","요일","시간","출발지","도착","실제 소요","출발 전 예상","차이","날씨","기온","메모"], trips);
+  const estimates = data.estimates.slice(0,40).map(e => [fmtTime(e.observed_at), esc(e.weekday || "-"), esc(e.local_time || "-"), esc(e.departure_location || "-"), esc(e.direction), esc(routeNames[e.route_id]), fmtMinutes(e.duration_seconds), e.distance_meters ? (e.distance_meters/1000).toFixed(1)+"km" : "-", e.route_match ? "확인" : "미확인", esc(e.weather_description || "-"), e.temperature_c == null ? "-" : `${e.temperature_c}°C`, esc(e.error || e.weather_error || (JSON.parse(e.road_names || "[]").join(", ")))]);
+  document.getElementById("estimatesTable").innerHTML = table(["조회","요일","시간","출발지","방향","경로","예상시간","거리","지정 도로","날씨","기온","도로명 / 오류"], estimates);
+}
+async function refresh() { try { render(await api("/api/dashboard")); } catch(e) { document.getElementById("stateError").textContent = "프로그램 서버에 연결할 수 없습니다. start.ps1을 실행한 뒤 이 화면을 새로고침하세요."; } }
+document.getElementById("settingsForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const msg = document.getElementById("settingsMessage");
+  msg.className = "small"; msg.textContent = "저장 중…";
+  try {
+    const result = await api("/api/settings", {api_key:document.getElementById("apiKey").value, interval_minutes:Number(document.getElementById("interval").value), weekdays_only:document.getElementById("weekdays").checked});
+    document.getElementById("apiKey").value = "";
+    msg.className = "ok"; msg.textContent = result.message;
+    await refresh();
+  } catch(err) { msg.className = "error"; msg.textContent = err.message; }
+});
+document.querySelectorAll("[data-start]").forEach(button => button.addEventListener("click", async () => {
+  const [direction, route_id] = button.dataset.start.split(",");
+  try { await api("/api/trips/start", {direction, route_id}); await refresh(); }
+  catch(e) { alert(e.message); }
+}));
+async function finishTrip() {
+  try { await api("/api/trips/finish", {}); await refresh(); }
+  catch(e) { alert(e.message); }
+}
+document.getElementById("pollNow").addEventListener("click", async () => {
+  try { await api("/api/poll-now", {direction:document.getElementById("pollDirection").value}); document.getElementById("settingsMessage").textContent = "조회를 시작했습니다."; }
+  catch(e) { document.getElementById("settingsMessage").textContent = e.message; }
+});
+document.getElementById("testStart").addEventListener("click", async () => {
+  try { await api("/api/test-start", {}); await refresh(); }
+  catch(e) { document.getElementById("stateError").textContent = e.message; }
+});
+refresh();
+setInterval(refresh, 15000);
+</script>
+</body>
+</html>
